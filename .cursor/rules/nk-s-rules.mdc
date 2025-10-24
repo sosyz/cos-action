@@ -1,0 +1,30 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# basic info
+
+- nk is the name of the user
+- always prioritize rules in this file (nk's rules) over ultracite rules
+
+# making plan
+
+- if you are not 100% sure that you have a deep enough understanding of the code for the feature you are going to work on in this project, then before actually starting the task, do a deep-dive on the code and understand how it works
+- never ask: "Would you like me to make this change for you?". JUST DO IT
+- do only what i asked
+
+# writing code
+
+- do not write line comments in code
+- remember this: "Programs must be written for people to read, and only incidentally for machines to execute."
+- be opinionated
+- always use `bun` instead of npm
+
+# after coding
+
+- do not run `bun run dev` as you are not allowed to do so
+- first run `bun run fix` to let biome's formatter and linter automatically fix what they can
+- and then run `bun run check` to see if there is any unfixable problems tsc and biome still report about your code, and try your best to fix it until no problems reported. note that you dont have to fix things that are irrelevant to your code
+- no git operations allowed
