@@ -1,0 +1,351 @@
+---
+description: Check this when you want to add new CRUD APIs
+alwaysApply: false
+---
+
+# CRUD
+
+This is how you do basic CRUD with oRPC & DrizzleORM:
+
+```typescript
+const create = os
+  .route({
+    method: 'POST',
+    path: `/${plural}`,
+    summary: `Create ${singular}`,
+  })
+  .input(insertSchema)
+  .output(z.object({ id: z.string() }))
+  .handler(async ({ input }) => {
+    const result = (
+      await db
+        .insert(table)
+        .values({
+          id: uuidv7(),
+          ...input,
+        })
+        .returning({ id: table.id })
+    )[0];
+    if (!result) {
+      throw new ORPCError(`${Singluar} not created`);
+    }
+    return result;
+  });
+
+const get = os
+  .route({
+    method: 'GET',
+    path: `/${plural}/{id}`,
+    summary: `Get ${singular}`,
+  })
+  .input(selectSchema.pick({ id: true }))
+  .output(selectSchema)
+  .handler(async ({ input }) => {
+    const result = (
+      await db
+        .select()
+        .from(table)
+        .where(and(eq(table.id, input.id), isNull(table.deleted_at)))
+        .limit(1)
+    )[0];
+    if (!result) {
+      throw new ORPCError(`${Singluar} not found`);
+    }
+    return result;
+  });
+
+const count = os
+  .route({
+    method: 'GET',
+    path: `/${plural}/count`,
+    summary: `Count ${plural}`,
+  })
+  .output(z.object({ count: z.number() }))
+  .handler(async () => {
+    return {
+      count: await db.$count(table, isNull(table.deleted_at)),
+    };
+  });
+
+const list = os
+  .route({
+    method: 'POST',
+    path: `/${plural}/list`,
+    summary: `List ${plural}`,
+  })
+  .input(
+    z.union([
+      z
+        .object({
+          cursor: z.string().optional(),
+          pageSize: z
+            .number()
+            .min(MIN_PAGE_SIZE)
+            .max(MAX_PAGE_SIZE)
+            .default(10),
+        })
+        .strict()
+        .transform((v) => ({ ...v, type: 'cursor' as const })),
+      z
+        .object({
+          page: z.number().min(1),
+          pageSize: z
+            .number()
+            .min(MIN_PAGE_SIZE)
+            .max(MAX_PAGE_SIZE)
+            .default(10),
+        })
+        .strict()
+        .transform((v) => ({ ...v, type: 'limit-offset' as const })),
+    ])
+  )
+  .output(z.array(selectSchema))
+  .handler(async ({ input }) => {
+    switch (input.type) {
+      case 'cursor':
+        return await db
+          .select()
+          .from(table)
+          .where(
+            and(
+              input.cursor ? gt(table.id, input.cursor) : undefined,
+              isNull(table.deleted_at)
+            )
+          )
+          .limit(input.pageSize)
+          .orderBy(asc(table.id));
+      case 'limit-offset':
+        return await db
+          .select()
+          .from(table)
+          .where(isNull(table.deleted_at))
+          .orderBy(asc(table.id))
+          .limit(input.pageSize)
+          .offset((input.page - 1) * input.pageSize);
+      default: {
+        const _exhaustive: never = input;
+        throw new ORPCError('Invalid pagination input');
+      }
+    }
+  });
+
+const update = os
+  .route({
+    method: 'POST',
+    path: `/${plural}/{id}`,
+    summary: `Update ${singular}`,
+  })
+  .input(updateSchema)
+  .output(selectSchema)
+  .handler(async ({ input }) => {
+    const result = (
+      await db
+        .update(table)
+        .set({
+          ...input,
+          updated_at: new Date(),
+        })
+        .where(eq(table.id, input.id))
+        .returning()
+    )[0];
+    if (!result) {
+      throw new ORPCError(`${Singluar} not updated`);
+    }
+    return result;
+  });
+
+const del = os
+  .route({
+    method: 'POST',
+    path: `/${plural}/{id}/delete`,
+    summary: `Delete ${singular}`,
+  })
+  .input(selectSchema.pick({ id: true }))
+  .output(selectSchema.pick({ id: true }))
+  .handler(async ({ input }) => {
+    const result = (
+      await db
+        .update(table)
+        .set({ deleted_at: new Date(), updated_at: new Date() })
+        .where(eq(table.id, input.id))
+        .returning({ id: table.id })
+    )[0];
+    if (!result) {
+      throw new ORPCError(`${Singluar} not deleted`);
+    }
+    return result;
+  });
+```
+# CRUD
+
+This is how you do basic CRUD with oRPC & DrizzleORM:
+
+```typescript
+const create = os
+  .route({
+    method: 'POST',
+    path: `/${plural}`,
+    summary: `Create ${singular}`,
+  })
+  .input(insertSchema)
+  .output(z.object({ id: z.string() }))
+  .handler(async ({ input }) => {
+    const result = (
+      await db
+        .insert(table)
+        .values({
+          id: uuidv7(),
+          ...input,
+        })
+        .returning({ id: table.id })
+    )[0];
+    if (!result) {
+      throw new ORPCError(`${Singluar} not created`);
+    }
+    return result;
+  });
+
+const get = os
+  .route({
+    method: 'GET',
+    path: `/${plural}/{id}`,
+    summary: `Get ${singular}`,
+  })
+  .input(selectSchema.pick({ id: true }))
+  .output(selectSchema)
+  .handler(async ({ input }) => {
+    const result = (
+      await db
+        .select()
+        .from(table)
+        .where(and(eq(table.id, input.id), isNull(table.deleted_at)))
+        .limit(1)
+    )[0];
+    if (!result) {
+      throw new ORPCError(`${Singluar} not found`);
+    }
+    return result;
+  });
+
+const count = os
+  .route({
+    method: 'GET',
+    path: `/${plural}/count`,
+    summary: `Count ${plural}`,
+  })
+  .output(z.object({ count: z.number() }))
+  .handler(async () => {
+    return {
+      count: await db.$count(table, isNull(table.deleted_at)),
+    };
+  });
+
+const list = os
+  .route({
+    method: 'POST',
+    path: `/${plural}/list`,
+    summary: `List ${plural}`,
+  })
+  .input(
+    z.union([
+      z
+        .object({
+          cursor: z.string().optional(),
+          pageSize: z
+            .number()
+            .min(MIN_PAGE_SIZE)
+            .max(MAX_PAGE_SIZE)
+            .default(10),
+        })
+        .strict()
+        .transform((v) => ({ ...v, type: 'cursor' as const })),
+      z
+        .object({
+          page: z.number().min(1),
+          pageSize: z
+            .number()
+            .min(MIN_PAGE_SIZE)
+            .max(MAX_PAGE_SIZE)
+            .default(10),
+        })
+        .strict()
+        .transform((v) => ({ ...v, type: 'limit-offset' as const })),
+    ])
+  )
+  .output(z.array(selectSchema))
+  .handler(async ({ input }) => {
+    switch (input.type) {
+      case 'cursor':
+        return await db
+          .select()
+          .from(table)
+          .where(
+            and(
+              input.cursor ? gt(table.id, input.cursor) : undefined,
+              isNull(table.deleted_at)
+            )
+          )
+          .limit(input.pageSize)
+          .orderBy(asc(table.id));
+      case 'limit-offset':
+        return await db
+          .select()
+          .from(table)
+          .where(isNull(table.deleted_at))
+          .orderBy(asc(table.id))
+          .limit(input.pageSize)
+          .offset((input.page - 1) * input.pageSize);
+      default: {
+        const _exhaustive: never = input;
+        throw new ORPCError('Invalid pagination input');
+      }
+    }
+  });
+
+const update = os
+  .route({
+    method: 'POST',
+    path: `/${plural}/{id}`,
+    summary: `Update ${singular}`,
+  })
+  .input(updateSchema)
+  .output(selectSchema)
+  .handler(async ({ input }) => {
+    const result = (
+      await db
+        .update(table)
+        .set({
+          ...input,
+          updated_at: new Date(),
+        })
+        .where(eq(table.id, input.id))
+        .returning()
+    )[0];
+    if (!result) {
+      throw new ORPCError(`${Singluar} not updated`);
+    }
+    return result;
+  });
+
+const del = os
+  .route({
+    method: 'POST',
+    path: `/${plural}/{id}/delete`,
+    summary: `Delete ${singular}`,
+  })
+  .input(selectSchema.pick({ id: true }))
+  .output(selectSchema.pick({ id: true }))
+  .handler(async ({ input }) => {
+    const result = (
+      await db
+        .update(table)
+        .set({ deleted_at: new Date(), updated_at: new Date() })
+        .where(eq(table.id, input.id))
+        .returning({ id: table.id })
+    )[0];
+    if (!result) {
+      throw new ORPCError(`${Singluar} not deleted`);
+    }
+    return result;
+  });
+```
