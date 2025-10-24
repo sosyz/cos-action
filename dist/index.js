@@ -74,16 +74,22 @@ const uploadFileToCOS = (cos, filePath) => {
         });
     });
 };
-const deleteFileFromCOS = (cos, filePath) => {
+const deleteMultipleFilesFromCOS = (cos, filePaths) => {
     return new Promise((resolve, reject) => {
-        cos.cli.deleteObject({
+        if (filePaths.length === 0) {
+            return resolve({ Deleted: [] });
+        }
+        const objects = filePaths.map((filePath) => ({
+            Key: path.join(cos.remotePath, filePath),
+        }));
+        cos.cli.deleteMultipleObject({
             Bucket: cos.bucket,
             Region: cos.region,
-            Key: path.join(cos.remotePath, filePath),
+            Objects: objects,
         }, (err, data) => {
             if (err) {
                 const errorMessage = err instanceof Error ? err.message : String(err);
-                return reject(new Error(`Delete failed for ${filePath}: ${errorMessage}`));
+                return reject(new Error(`Batch delete failed: ${errorMessage}`));
             }
             else {
                 return resolve(data);
@@ -136,7 +142,7 @@ const uploadFiles = async (cos, localFiles) => {
     }
 };
 const collectRemoteFiles = async (cos) => {
-    const files = new Set();
+    const files = [];
     let data = {};
     let nextMarker = undefined;
     do {
@@ -147,48 +153,44 @@ const collectRemoteFiles = async (cos) => {
                 while (relativePath[0] === "/") {
                     relativePath = relativePath.substring(1);
                 }
-                files.add(relativePath);
+                if (relativePath) {
+                    files.push(relativePath);
+                }
             }
         }
         nextMarker = data.NextMarker;
     } while (data.IsTruncated === "true");
     return files;
 };
-const findDeletedFiles = (localFiles, remoteFiles) => {
-    const deletedFiles = new Set();
-    for (const file of remoteFiles) {
-        if (!localFiles.has(file)) {
-            deletedFiles.add(file);
-        }
+const cleanRemotePath = async (cos) => {
+    console.log(`Cleaning remote path: ${cos.remotePath}`);
+    const remoteFiles = await collectRemoteFiles(cos);
+    if (remoteFiles.length === 0) {
+        console.log("Remote path is already empty");
+        return 0;
     }
-    return deletedFiles;
-};
-const cleanDeleteFiles = async (cos, deleteFiles) => {
-    const size = deleteFiles.size;
-    let index = 0;
-    let percent = 0;
-    for (const file of deleteFiles) {
-        await deleteFileFromCOS(cos, file);
-        index++;
-        percent = Math.floor((index / size) * 100);
-        console.log(`>> [${index}/${size}, ${percent}%] cleaned ${path.join(cos.remotePath, file)}`);
+    console.log(`Found ${remoteFiles.length} files to delete`);
+    const batchSize = 1000;
+    let totalCleaned = 0;
+    for (let i = 0; i < remoteFiles.length; i += batchSize) {
+        const batch = remoteFiles.slice(i, i + batchSize);
+        await deleteMultipleFilesFromCOS(cos, batch);
+        totalCleaned += batch.length;
+        const percent = Math.floor((totalCleaned / remoteFiles.length) * 100);
+        console.log(`>> [${totalCleaned}/${remoteFiles.length}, ${percent}%] deleted`);
     }
+    console.log(`Remote path cleaned: deleted ${totalCleaned} files`);
+    return totalCleaned;
 };
 const process = async (cos) => {
     try {
+        let cleanedFilesCount = 0;
+        if (cos.clean) {
+            cleanedFilesCount = await cleanRemotePath(cos);
+        }
         const localFiles = await collectLocalFiles(cos);
         console.log(localFiles.size, "files to be uploaded");
         await uploadFiles(cos, localFiles);
-        let cleanedFilesCount = 0;
-        if (cos.clean) {
-            const remoteFiles = await collectRemoteFiles(cos);
-            const deletedFiles = findDeletedFiles(localFiles, remoteFiles);
-            if (deletedFiles.size > 0) {
-                console.log(`${deletedFiles.size} files to be cleaned`);
-            }
-            await cleanDeleteFiles(cos, deletedFiles);
-            cleanedFilesCount = deletedFiles.size;
-        }
         let cleanedFilesMessage = "";
         if (cleanedFilesCount > 0) {
             cleanedFilesMessage = `, cleaned ${cleanedFilesCount} files`;

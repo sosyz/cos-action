@@ -66,23 +66,29 @@ const uploadFileToCOS = (
 	});
 };
 
-const deleteFileFromCOS = (
+const deleteMultipleFilesFromCOS = (
 	cos: COSInstance,
-	filePath: string,
+	filePaths: string[],
 ): Promise<unknown> => {
 	return new Promise((resolve, reject) => {
-		cos.cli.deleteObject(
+		if (filePaths.length === 0) {
+			return resolve({ Deleted: [] });
+		}
+
+		const objects = filePaths.map((filePath) => ({
+			Key: path.join(cos.remotePath, filePath),
+		}));
+
+		cos.cli.deleteMultipleObject(
 			{
 				Bucket: cos.bucket,
 				Region: cos.region,
-				Key: path.join(cos.remotePath, filePath),
+				Objects: objects,
 			},
 			(err: unknown, data: unknown) => {
 				if (err) {
 					const errorMessage = err instanceof Error ? err.message : String(err);
-					return reject(
-						new Error(`Delete failed for ${filePath}: ${errorMessage}`),
-					);
+					return reject(new Error(`Batch delete failed: ${errorMessage}`));
 				} else {
 					return resolve(data);
 				}
@@ -145,8 +151,8 @@ const uploadFiles = async (
 	}
 };
 
-const collectRemoteFiles = async (cos: COSInstance): Promise<Set<string>> => {
-	const files = new Set<string>();
+const collectRemoteFiles = async (cos: COSInstance): Promise<string[]> => {
+	const files: string[] = [];
 	let data: COSResponse = {};
 	let nextMarker: string | undefined = undefined;
 
@@ -158,7 +164,9 @@ const collectRemoteFiles = async (cos: COSInstance): Promise<Set<string>> => {
 				while (relativePath[0] === "/") {
 					relativePath = relativePath.substring(1);
 				}
-				files.add(relativePath);
+				if (relativePath) {
+					files.push(relativePath);
+				}
 			}
 		}
 		nextMarker = data.NextMarker;
@@ -167,51 +175,47 @@ const collectRemoteFiles = async (cos: COSInstance): Promise<Set<string>> => {
 	return files;
 };
 
-const findDeletedFiles = (
-	localFiles: Set<string>,
-	remoteFiles: Set<string>,
-): Set<string> => {
-	const deletedFiles = new Set<string>();
-	for (const file of remoteFiles) {
-		if (!localFiles.has(file)) {
-			deletedFiles.add(file);
-		}
-	}
-	return deletedFiles;
-};
+const cleanRemotePath = async (cos: COSInstance): Promise<number> => {
+	console.log(`Cleaning remote path: ${cos.remotePath}`);
 
-const cleanDeleteFiles = async (
-	cos: COSInstance,
-	deleteFiles: Set<string>,
-): Promise<void> => {
-	const size = deleteFiles.size;
-	let index = 0;
-	let percent = 0;
-	for (const file of deleteFiles) {
-		await deleteFileFromCOS(cos, file);
-		index++;
-		percent = Math.floor((index / size) * 100);
+	const remoteFiles = await collectRemoteFiles(cos);
+
+	if (remoteFiles.length === 0) {
+		console.log("Remote path is already empty");
+		return 0;
+	}
+
+	console.log(`Found ${remoteFiles.length} files to delete`);
+
+	const batchSize = 1000;
+	let totalCleaned = 0;
+
+	for (let i = 0; i < remoteFiles.length; i += batchSize) {
+		const batch = remoteFiles.slice(i, i + batchSize);
+		await deleteMultipleFilesFromCOS(cos, batch);
+		totalCleaned += batch.length;
+		const percent = Math.floor((totalCleaned / remoteFiles.length) * 100);
 		console.log(
-			`>> [${index}/${size}, ${percent}%] cleaned ${path.join(cos.remotePath, file)}`,
+			`>> [${totalCleaned}/${remoteFiles.length}, ${percent}%] deleted`,
 		);
 	}
+
+	console.log(`Remote path cleaned: deleted ${totalCleaned} files`);
+	return totalCleaned;
 };
 
 const process = async (cos: COSInstance): Promise<void> => {
 	try {
+		let cleanedFilesCount = 0;
+
+		if (cos.clean) {
+			cleanedFilesCount = await cleanRemotePath(cos);
+		}
+
 		const localFiles = await collectLocalFiles(cos);
 		console.log(localFiles.size, "files to be uploaded");
 		await uploadFiles(cos, localFiles);
-		let cleanedFilesCount = 0;
-		if (cos.clean) {
-			const remoteFiles = await collectRemoteFiles(cos);
-			const deletedFiles = findDeletedFiles(localFiles, remoteFiles);
-			if (deletedFiles.size > 0) {
-				console.log(`${deletedFiles.size} files to be cleaned`);
-			}
-			await cleanDeleteFiles(cos, deletedFiles);
-			cleanedFilesCount = deletedFiles.size;
-		}
+
 		let cleanedFilesMessage = "";
 		if (cleanedFilesCount > 0) {
 			cleanedFilesMessage = `, cleaned ${cleanedFilesCount} files`;
