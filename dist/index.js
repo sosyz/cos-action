@@ -62,7 +62,6 @@ const uploadFileToCOS = (cos, filePath) => {
             Bucket: cos.bucket,
             Region: cos.region,
             Key: path.join(cos.remotePath, filePath),
-            StorageClass: "STANDARD",
             Body: fs.createReadStream(path.join(cos.localPath, filePath)),
         }, (err, data) => {
             if (err) {
